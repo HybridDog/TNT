@@ -162,7 +162,7 @@ function boom(pos, time, player)
 	end, pos)
 end
 
-minetest.register_node(":tnt:tnt", {
+minetest.register_node("tnt:tnt", {
 	description = "TNT",
 	tiles = {"default_tnt_top.png", "default_tnt_bottom.png", tnt_side},
 	groups = {dig_immediate=2, mesecon=2},
@@ -207,7 +207,7 @@ end
 
 local animated_tnt_texture = combine_texture(16, 4, "default_tnt_top.png", "tnt_top_burning_animated.png")
 
-minetest.register_node(":tnt:tnt_burning", {
+minetest.register_node("tnt:tnt_burning", {
 	tiles = {{name=animated_tnt_texture, animation={type="vertical_frames", aspect_w=16, aspect_h=16, length=1}},
 	"default_tnt_bottom.png", tnt_side},
 	light_source = 5,
@@ -264,7 +264,7 @@ function burn(pos, player)
 	end, pos)
 end
 
-minetest.register_node(":tnt:gunpowder", {
+minetest.register_node("tnt:gunpowder", {
 	description = "Gun Powder",
 	drawtype = "raillike",
 	paramtype = "light",
@@ -287,7 +287,7 @@ minetest.register_node(":tnt:gunpowder", {
 	end,
 })
 
-minetest.register_node(":tnt:gunpowder_burning", {
+minetest.register_node("tnt:gunpowder_burning", {
 	drawtype = "raillike",
 	paramtype = "light",
 	sunlight_propagates = true,
