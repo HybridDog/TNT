@@ -89,7 +89,7 @@ function boom(pos, time, player)
 		nodes[p_pos] = tnt_c_air
 		minetest.add_particle(pos, {x=0,y=0,z=0}, {x=0,y=0,z=0}, 0.5, 16, false, "tnt_boom.png")
 		--minetest.set_node(pos, {name="tnt:boom"})
-		
+
 		local objects = minetest.get_objects_inside_radius(pos, 7)
 		for _,obj in ipairs(objects) do
 			if obj:is_player()
@@ -104,12 +104,12 @@ function boom(pos, time, player)
 				}, vec)
 			end
 		end
-		
+
 		for dx=-tnt_range,tnt_range do
 			for dz=-tnt_range,tnt_range do
 				for dy=tnt_range,-tnt_range,-1 do
 					local p = {x=pos.x+dx, y=pos.y+dy, z=pos.z+dz}
-					
+
 					local p_node = area:index(p.x, p.y, p.z)
 					local d_p_node = nodes[p_node]
 					local node =  minetest.get_node(p)
@@ -128,11 +128,11 @@ function boom(pos, time, player)
 							end
 						end
 					end
-					
+
 				end
 			end
 		end
-		
+
 		minetest.add_particlespawner(
 			100, --amount
 			0.1, --time
@@ -167,7 +167,7 @@ minetest.register_node(":tnt:tnt", {
 	tiles = {"default_tnt_top.png", "default_tnt_bottom.png", tnt_side},
 	groups = {dig_immediate=2, mesecon=2},
 	sounds = default.node_sound_wood_defaults(),
-	
+
 	on_punch = function(pos, node, puncher)
 		if puncher:get_wielded_item():get_name() == "default:torch" then
 			minetest.sound_play("tnt_ignite", {pos=pos})
@@ -175,7 +175,7 @@ minetest.register_node(":tnt:tnt", {
 			boom(pos, 4, puncher)
 		end
 	end,
-	
+
 	mesecons = {
 		effector = {
 			action_on = function(pos, node)
@@ -230,7 +230,7 @@ function burn(pos, player)
 	end
 	minetest.sound_play("tnt_gunpowder_burning", {pos=pos, gain=2})
 	minetest.set_node(pos, {name="tnt:gunpowder_burning"})
-	
+
 	minetest.after(1, function(pos)
 		if minetest.get_node(pos).name ~= "tnt:gunpowder_burning" then
 			return
@@ -244,7 +244,7 @@ function burn(pos, player)
 					pos.x = pos.x+dx
 					pos.y = pos.y+dy
 					pos.z = pos.z+dz
-					
+
 					if not (math.abs(dx) == 1 and math.abs(dz) == 1) then
 						if dy == 0 then
 							burn({x=pos.x, y=pos.y, z=pos.z}, player)
@@ -254,7 +254,7 @@ function burn(pos, player)
 							end
 						end
 					end
-					
+
 					pos.x = pos.x-dx
 					pos.y = pos.y-dy
 					pos.z = pos.z-dz
@@ -279,7 +279,7 @@ minetest.register_node(":tnt:gunpowder", {
 	},
 	groups = {dig_immediate=2,attached_node=1},
 	sounds = default.node_sound_leaves_defaults(),
-	
+
 	on_punch = function(pos, node, puncher)
 		if puncher:get_wielded_item():get_name() == "default:torch" then
 			burn(pos, puncher)
