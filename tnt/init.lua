@@ -3,6 +3,8 @@ local tnt_preserve_items = false
 local tnt_drop_items = false
 local tnt_seed = 15
 
+-- todo: use on_blasts of nodes
+
 local tnt_side = "default_tnt_side.png^tnt_shadows.png"
 
 local function get_tnt_random(pos)
@@ -68,98 +70,131 @@ local function destroy(pos, player)
 	drop_item(pos, nodename, player)
 end
 
-function boom(pos, time, player)
-	minetest.after(time, function(pos)
-		if minetest.get_node(pos).name ~= "tnt:tnt_burning" then
-			return
+local particledef = {
+	amount = 100,
+	time = 0.1,
+	minvel = {x=0, y=0, z=0},
+	maxvel = {x=0, y=0, z=0},
+	minacc = {x=-0.5,y=5,z=-0.5},
+	maxacc = {x=0.5,y=5,z=0.5},
+	minexptime = 0.1,
+	maxexptime = 1,
+	minsize = 8,
+	maxsize = 15,
+	collisiondetection = false,
+	texture = "tnt_smoke.png",
+}
+
+local particledef_hot = {
+	velocity = {x=0, y=0, z=0},
+	acceleration = {x=0, y=0, z=0},
+	expirationtime = 0.5,
+	size = 16,
+	collisiondetection = false,
+	texture = "tnt_boom.png",
+}
+
+local function delayed_map_update(manip, pos)
+	local t1 = os.clock()
+	manip:update_map()
+
+	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=tnt_range*64})
+
+	particledef_hot.pos = pos
+	minetest.add_particle(particledef_hot)
+
+	particledef.minpos = vector.subtract(pos, 3)
+	particledef.maxpos = vector.add(pos, 3)
+	minetest.add_particlespawner(particledef)
+
+	print(string.format("[tnt] map updated after: %.2fs", os.clock() - t1))
+end
+
+local function bare_boom(pos, player)
+	if minetest.get_node(pos).name ~= "tnt:tnt_burning" then
+		return
+	end
+
+	local t1 = os.clock()
+	pr = get_tnt_random(pos)
+
+	local manip = minetest.get_voxel_manip()
+	local width = tnt_range
+	local emerged_pos1, emerged_pos2 = manip:read_from_map({x=pos.x-width, y=pos.y-width, z=pos.z-width},
+		{x=pos.x+width, y=pos.y+width, z=pos.z+width})
+	area = VoxelArea:new{MinEdge=emerged_pos1, MaxEdge=emerged_pos2}
+	nodes = manip:get_data()
+
+	local p_pos = area:index(pos.x, pos.y, pos.z)
+	nodes[p_pos] = tnt_c_air
+	--minetest.set_node(pos, {name="tnt:boom"})
+
+	for _,obj in pairs(minetest.get_objects_inside_radius(pos, 7)) do
+		if obj:is_player()
+		or (obj:get_luaentity() and obj:get_luaentity().name ~= "__builtin:item") then
+			local obj_p = obj:getpos()
+			local vec = {x=obj_p.x-pos.x, y=obj_p.y-pos.y, z=obj_p.z-pos.z}
+			local dist = (vec.x^2+vec.y^2+vec.z^2)^0.5
+			local damage = (80*0.5^dist)*2
+			obj:punch(obj, 1.0, {
+				full_punch_interval=1.0,
+				damage_groups={fleshy=damage},
+			}, vec)
 		end
+	end
 
-		local t1 = os.clock()
-		pr = get_tnt_random(pos)
-		minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=tnt_range*64})
+	local near_tnts,nn = {},1
+	for dx=-tnt_range,tnt_range do
+		for dz=-tnt_range,tnt_range do
+			for dy=tnt_range,-tnt_range,-1 do
+				local p = {x=pos.x+dx, y=pos.y+dy, z=pos.z+dz}
 
-		local manip = minetest.get_voxel_manip()
-		local width = tnt_range
-		local emerged_pos1, emerged_pos2 = manip:read_from_map({x=pos.x-width, y=pos.y-width, z=pos.z-width},
-			{x=pos.x+width, y=pos.y+width, z=pos.z+width})
-		area = VoxelArea:new{MinEdge=emerged_pos1, MaxEdge=emerged_pos2}
-		nodes = manip:get_data()
-
-		local p_pos = area:index(pos.x, pos.y, pos.z)
-		nodes[p_pos] = tnt_c_air
-		minetest.add_particle(pos, {x=0,y=0,z=0}, {x=0,y=0,z=0}, 0.5, 16, false, "tnt_boom.png")
-		--minetest.set_node(pos, {name="tnt:boom"})
-
-		local objects = minetest.get_objects_inside_radius(pos, 7)
-		for _,obj in ipairs(objects) do
-			if obj:is_player()
-			or (obj:get_luaentity() and obj:get_luaentity().name ~= "__builtin:item") then
-				local obj_p = obj:getpos()
-				local vec = {x=obj_p.x-pos.x, y=obj_p.y-pos.y, z=obj_p.z-pos.z}
-				local dist = (vec.x^2+vec.y^2+vec.z^2)^0.5
-				local damage = (80*0.5^dist)*2
-				obj:punch(obj, 1.0, {
-					full_punch_interval=1.0,
-					damage_groups={fleshy=damage},
-				}, vec)
-			end
-		end
-
-		for dx=-tnt_range,tnt_range do
-			for dz=-tnt_range,tnt_range do
-				for dy=tnt_range,-tnt_range,-1 do
-					local p = {x=pos.x+dx, y=pos.y+dy, z=pos.z+dz}
-
-					local p_node = area:index(p.x, p.y, p.z)
-					local d_p_node = nodes[p_node]
-					local node =  minetest.get_node(p)
-					if d_p_node == tnt_c_tnt
-					or d_p_node == tnt_c_tnt_burning then
-						nodes[p_node] = tnt_c_tnt_burning
-						boom({x=p.x, y=p.y, z=p.z}, 0, player)
-					elseif not ( d_p_node == tnt_c_fire
-					or string.find(node.name, "default:water_")
-					or string.find(node.name, "default:lava_")) then
-						if math.abs(dx)<tnt_range and math.abs(dy)<tnt_range and math.abs(dz)<tnt_range then
+				local p_node = area:index(p.x, p.y, p.z)
+				local d_p_node = nodes[p_node]
+				local node =  minetest.get_node(p)
+				if d_p_node == tnt_c_tnt
+				or d_p_node == tnt_c_tnt_burning then
+					nodes[p_node] = tnt_c_tnt_burning
+					--boom({x=p.x, y=p.y, z=p.z}, 0, player)
+					near_tnts[nn] = p
+					nn = nn+1
+				elseif not ( d_p_node == tnt_c_fire
+				or string.find(node.name, "default:water_")
+				or string.find(node.name, "default:lava_")) then
+					if math.abs(dx)<tnt_range and math.abs(dy)<tnt_range and math.abs(dz)<tnt_range then
+						destroy(p, player)
+					else
+						if pr:next(1,5) <= 4 then
 							destroy(p, player)
-						else
-							if pr:next(1,5) <= 4 then
-								destroy(p, player)
-							end
 						end
 					end
-
 				end
+
 			end
 		end
+	end
 
-		minetest.add_particlespawner(
-			100, --amount
-			0.1, --time
-			{x=pos.x-3, y=pos.y-3, z=pos.z-3}, --minpos
-			{x=pos.x+3, y=pos.y+3, z=pos.z+3}, --maxpos
-			{x=-0, y=-0, z=-0}, --minvel
-			{x=0, y=0, z=0}, --maxvel
-			{x=-0.5,y=5,z=-0.5}, --minacc
-			{x=0.5,y=5,z=0.5}, --maxacc
-			0.1, --minexptime
-			1, --maxexptime
-			8, --minsize
-			15, --maxsize
-			false, --collisiondetection
-			"tnt_smoke.png" --texture
-		)
-		manip:set_data(nodes)
-		manip:write_to_map()
-		print(string.format("[tnt] exploded in: %.2fs", os.clock() - t1))
-		local t1 = os.clock()
-		manip:update_map()
-		print(string.format("[tnt] map updated after: %.2fs", os.clock() - t1))
+	manip:set_data(nodes)
+	manip:write_to_map()
+	print(string.format("[tnt] exploded in: %.2fs", os.clock() - t1))
+
+	minetest.delay_function(16384, function(near_tnts, player)
+		for _,p in pairs(near_tnts) do
+			bare_boom(p, player)
+		end
+	end, near_tnts, player)
+
+	minetest.delay_function(16384, delayed_map_update, manip, pos)
 --		minetest.after(0.5, function(pos)
 --				minetest.remove_node(pos)
 --			end, {x=pos.x, y=pos.y, z=pos.z}
 --		)
-	end, pos)
+end
+
+function boom(pos, time, player)
+	minetest.after(time, function(pos, player)
+		minetest.delay_function(16384, bare_boom, pos, player)
+	end, pos, player)
 end
 
 minetest.register_node(":tnt:tnt", {
@@ -280,7 +315,7 @@ minetest.register_node(":tnt:gunpowder", {
 	groups = {dig_immediate=2,attached_node=1},
 	sounds = default.node_sound_leaves_defaults(),
 
-	on_punch = function(pos, node, puncher)
+	on_punch = function(pos, _, puncher)
 		if puncher:get_wielded_item():get_name() == "default:torch" then
 			burn(pos, puncher)
 		end
@@ -314,6 +349,7 @@ minetest.register_abm({
 	neighbors = {"fire:basic_flame"},
 	interval = 2,
 	chance = 10,
+	catch_up = false,
 	action = function(pos, node)
 		if node.name == "tnt:tnt" then
 			minetest.set_node(pos, {name="tnt:tnt_burning"})
