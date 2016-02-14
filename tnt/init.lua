@@ -51,7 +51,7 @@ local function drop_item(pos, nodename, player)
 	end
 end
 
-local function destroy(pos, player)
+local function destroy(pos, player, area, nodes)
 	local nodename = minetest.get_node(pos).name
 	local p_pos = area:index(pos.x, pos.y, pos.z)
 	if nodes[p_pos] ~= tnt_c_air then
@@ -122,8 +122,8 @@ local function bare_boom(pos, player)
 	local width = tnt_range
 	local emerged_pos1, emerged_pos2 = manip:read_from_map({x=pos.x-width, y=pos.y-width, z=pos.z-width},
 		{x=pos.x+width, y=pos.y+width, z=pos.z+width})
-	area = VoxelArea:new{MinEdge=emerged_pos1, MaxEdge=emerged_pos2}
-	nodes = manip:get_data()
+	local area = VoxelArea:new{MinEdge=emerged_pos1, MaxEdge=emerged_pos2}
+	local nodes = manip:get_data()
 
 	local p_pos = area:index(pos.x, pos.y, pos.z)
 	nodes[p_pos] = tnt_c_air
@@ -162,10 +162,10 @@ local function bare_boom(pos, player)
 				or string.find(node.name, "default:water_")
 				or string.find(node.name, "default:lava_")) then
 					if math.abs(dx)<tnt_range and math.abs(dy)<tnt_range and math.abs(dz)<tnt_range then
-						destroy(p, player)
+						destroy(p, player, area, nodes)
 					else
 						if pr:next(1,5) <= 4 then
-							destroy(p, player)
+							destroy(p, player, area, nodes)
 						end
 					end
 				end
