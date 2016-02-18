@@ -3,7 +3,7 @@ local tnt_preserve_items = false
 local tnt_drop_items = false
 local tnt_seed = 15
 
--- todo: use on_blasts of nodes
+-- todo: use on_blasts of nodes, maybe dont delay map update because of those memory access crashes
 
 local tnt_side = "default_tnt_side.png^tnt_shadows.png"
 
