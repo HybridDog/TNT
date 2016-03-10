@@ -53,11 +53,14 @@ end
 
 local function destroy(pos, player, area, nodes)
 	local nodename = minetest.get_node(pos).name
-	local p_pos = area:index(pos.x, pos.y, pos.z)
+	local p_pos = area:indexp(pos)
 	if nodes[p_pos] ~= tnt_c_air then
 --		minetest.remove_node(pos)
 --		nodeupdate(pos)
-		if minetest.registered_nodes[nodename].groups.flammable ~= nil then
+		local def = minetest.registered_nodes[nodename]
+		if def
+		and def.groups
+		and def.groups.flammable then
 			nodes[p_pos] = tnt_c_fire
 			return
 		end
@@ -178,13 +181,15 @@ local function bare_boom(pos, player)
 	manip:write_to_map()
 	print(string.format("[tnt] exploded in: %.2fs", os.clock() - t1))
 
-	minetest.delay_function(16384, function(near_tnts, player)
+	minetest.delay_function(10000, function(near_tnts, player)
 		for _,p in pairs(near_tnts) do
 			bare_boom(p, player)
 		end
 	end, near_tnts, player)
 
+	--delayed_map_update(manip, pos)
 	minetest.delay_function(16384, delayed_map_update, manip, pos)
+
 --		minetest.after(0.5, function(pos)
 --				minetest.remove_node(pos)
 --			end, {x=pos.x, y=pos.y, z=pos.z}
@@ -193,8 +198,8 @@ end
 
 function boom(pos, time, player)
 	minetest.after(time, function(pos, player)
-		minetest.delay_function(16384, bare_boom, pos, player)
-	end, pos, player)
+		minetest.delay_function(10000, bare_boom, pos, player)
+	end, pos, player or {})
 end
 
 minetest.register_node(":tnt:tnt", {
