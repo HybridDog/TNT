@@ -13,8 +13,9 @@ end
 
 local function drop_item(pos, nodename, player)
 	local drop = minetest.get_node_drops(nodename)
-	local drop_items = tnt_drop_items
-	if not player then
+	local drop_items
+	if tnt_drop_items
+	or not player then
 		drop_items = true
 	else
 		inv = player:get_inventory()
