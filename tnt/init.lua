@@ -12,35 +12,35 @@ local function get_tnt_random(pos)
 end
 
 local function drop_item(pos, nodename, player)
-	local drop = minetest.get_node_drops(nodename)
-	local drop_items
-	if tnt_drop_items
-	or not player then
-		drop_items = true
-	else
+	local drop_items = tnt_drop_items or (player and true)
+	local inv
+	if not drop_items then
 		inv = player:get_inventory()
 		if not inv then
 			drop_items = true
 		end
 	end
 
-	for _,item in ipairs(drop) do
+	for _,item in pairs(minetest.get_node_drops(nodename)) do
 		if not drop_items
 		and inv:room_for_item("main", item) then
 			inv:add_item("main", item)
 		else
 			if type(item) == "string" then
 				local obj = minetest.add_item(pos, item)
-				if obj == nil then
+				if not obj then
+					minetest.log("error", "[tnt] item (string) could not be spawned, aborting..")
 					return
 				end
 				obj:get_luaentity().collect = true
 				obj:setacceleration({x=0, y=-10, z=0})
 				obj:setvelocity({x=pr:next(0,6)-3, y=10, z=pr:next(0,6)-3})
 			else
+				-- This is the wrong way, isn't it?
 				for i=1,item:get_count() do
 					local obj = minetest.add_item(pos, item:get_name())
-					if obj == nil then
+					if not obj then
+						minetest.log("error", "[tnt] item (single) could not be spawned, aborting..")
 						return
 					end
 					obj:get_luaentity().collect = true
@@ -53,23 +53,24 @@ local function drop_item(pos, nodename, player)
 end
 
 local function destroy(pos, player, area, nodes)
-	local nodename = minetest.get_node(pos).name
 	local p_pos = area:indexp(pos)
-	if nodes[p_pos] ~= tnt_c_air then
+	if nodes[p_pos] == tnt_c_air then
+		return
+	end
+	local nodename = minetest.get_name_from_content_id(nodes[p_pos])
 --		minetest.remove_node(pos)
 --		nodeupdate(pos)
-		local def = minetest.registered_nodes[nodename]
-		if def
-		and def.groups
-		and def.groups.flammable then
-			nodes[p_pos] = tnt_c_fire
-			return
-		end
-		nodes[p_pos] = tnt_c_air
-		if pr:next(1,3) == 3
-		or not tnt_preserve_items then
-			return
-		end
+	local def = minetest.registered_nodes[nodename]
+	if def
+	and def.groups
+	and def.groups.flammable then
+		nodes[p_pos] = tnt_c_fire
+		return
+	end
+	nodes[p_pos] = tnt_c_air
+	if pr:next(1,3) == 3
+	or not tnt_preserve_items then
+		return
 	end
 	drop_item(pos, nodename, player)
 end
@@ -98,9 +99,20 @@ local particledef_hot = {
 	texture = "tnt_boom.png",
 }
 
-local function delayed_map_update(manip, pos)
-	local t1 = os.clock()
+-- vm updates a single mapchunk
+local function update_single_chunk(pos)
+	local manip = minetest.get_voxel_manip()
+	local emin,emax = manip:read_from_map(pos, pos)--vector.add(pos, 15))
+
+	manip:write_to_map()
 	manip:update_map()
+end
+
+-- updates mapchunk and then adds particles and plays sound
+local function visualized_chunkupdate(p, pos)
+	local t1 = minetest.get_us_time()
+
+	update_single_chunk(p)
 
 	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=tnt_range*64})
 
@@ -111,7 +123,63 @@ local function delayed_map_update(manip, pos)
 	particledef.maxpos = vector.add(pos, 3)
 	minetest.add_particlespawner(particledef)
 
-	print(string.format("[tnt] map updated after: %.2fs", os.clock() - t1))
+	--print("[tnt] map updated at "..vector.pos_to_string(pos) .." after ca. ".. (minetest.get_us_time() - t1) / 1000000 .." s")
+end
+
+--[[
+local function get_chunk(pos)
+	return vector.apply(vector.divide(pos, 16), math.floor)
+end--]]
+
+local set = vector.set_data_to_pos
+local get = vector.get_data_from_pos
+local remove = vector.remove_data_from_pos
+
+local chunkqueue_working = false
+local chunkqueue_list
+local chunkqueue = {}
+local function update_chunks()
+	local n
+	if not chunkqueue_list
+	and next(chunkqueue) then
+		local _
+		chunkqueue_list,_,_,n = vector.get_data_pos_table(chunkqueue)
+	end
+	--[[if n then
+		print("[tnt] updating "..n.." chunks in time")
+	end--]]
+	n = next(chunkqueue_list)
+	if not n then
+		--print("stopping chunkupdate")
+		chunkqueue_working = false
+		return
+	end
+	minetest.delay_function(16384, update_chunks)
+
+	local z,y,x, p = unpack(chunkqueue_list[n])
+	chunkqueue_list[n] = nil
+	remove(chunkqueue, z,y,x)
+	z = z*16
+	y = y*16
+	x = x*16
+	local pos = {x=x,y=y,z=z}
+	visualized_chunkupdate(pos, p)
+end
+
+local function extend_chunkqueue(emin, emax, p)
+	for z = emin.z, emax.z, 16 do
+		for y = emin.y, emax.y, 16 do
+			for x = emin.x, emax.x, 16 do
+				set(chunkqueue, z/16,y/16,x/16, p)
+			end
+		end
+	end
+	chunkqueue_list = nil
+	if not chunkqueue_working then
+		chunkqueue_working = true
+		--print("start chunkupdate")
+		minetest.delay_function(16384, update_chunks)
+	end
 end
 
 local function bare_boom(pos, player)
@@ -119,14 +187,13 @@ local function bare_boom(pos, player)
 		return
 	end
 
-	local t1 = os.clock()
+	local t1 = minetest.get_us_time()
 	pr = get_tnt_random(pos)
 
 	local manip = minetest.get_voxel_manip()
 	local width = tnt_range
-	local emerged_pos1, emerged_pos2 = manip:read_from_map({x=pos.x-width, y=pos.y-width, z=pos.z-width},
-		{x=pos.x+width, y=pos.y+width, z=pos.z+width})
-	local area = VoxelArea:new{MinEdge=emerged_pos1, MaxEdge=emerged_pos2}
+	local emin, emax = manip:read_from_map(vector.subtract(pos, width), vector.add(pos, width))
+	local area = VoxelArea:new{MinEdge=emin, MaxEdge=emax}
 	local nodes = manip:get_data()
 
 	local p_pos = area:index(pos.x, pos.y, pos.z)
@@ -155,7 +222,7 @@ local function bare_boom(pos, player)
 
 				local p_node = area:index(p.x, p.y, p.z)
 				local d_p_node = nodes[p_node]
-				local node =  minetest.get_node(p)
+				local nodename =  minetest.get_name_from_content_id(d_p_node)
 				if d_p_node == tnt_c_tnt
 				or d_p_node == tnt_c_tnt_burning then
 					nodes[p_node] = tnt_c_tnt_burning
@@ -163,8 +230,8 @@ local function bare_boom(pos, player)
 					near_tnts[nn] = p
 					nn = nn+1
 				elseif not ( d_p_node == tnt_c_fire
-				or string.find(node.name, "default:water_")
-				or string.find(node.name, "default:lava_")) then
+				or string.find(nodename, "default:water_")
+				or string.find(nodename, "default:lava_")) then
 					if math.abs(dx)<tnt_range and math.abs(dy)<tnt_range and math.abs(dz)<tnt_range then
 						destroy(p, player, area, nodes)
 					else
@@ -180,7 +247,7 @@ local function bare_boom(pos, player)
 
 	manip:set_data(nodes)
 	manip:write_to_map()
-	print(string.format("[tnt] exploded in: %.2fs", os.clock() - t1))
+	--print("[tnt] exploded after ca. ".. (minetest.get_us_time() - t1) / 1000000 .." s")
 
 	minetest.delay_function(10000, function(near_tnts, player)
 		for _,p in pairs(near_tnts) do
@@ -188,13 +255,7 @@ local function bare_boom(pos, player)
 		end
 	end, near_tnts, player)
 
-	--delayed_map_update(manip, pos)
-	minetest.delay_function(16384, delayed_map_update, manip, pos)
-
---		minetest.after(0.5, function(pos)
---				minetest.remove_node(pos)
---			end, {x=pos.x, y=pos.y, z=pos.z}
---		)
+	extend_chunkqueue(emin, emax, pos)
 end
 
 function boom(pos, time, player)
