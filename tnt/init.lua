@@ -1,6 +1,8 @@
-local tnt_range = 2
-local tnt_preserve_items = false
+local range = 2
+local pushvel = 20
+local preserve_items = false
 local tnt_drop_items = false
+local damage_objects = true
 local tnt_seed = 15
 
 -- todo: use on_blasts of nodes, maybe dont delay map update because of those memory access crashes
@@ -10,8 +12,38 @@ local tnt_side = "default_tnt_side.png^tnt_shadows.png"
 local function get_tnt_random(pos)
 	return PseudoRandom(math.abs(pos.x+pos.y*3+pos.z*5)+tnt_seed)
 end
+local pr
 
-local function drop_item(pos, nodename, player)
+local vsub = 1 / (range * range)
+local vfact = pushvel / (4 - vsub)
+local function get_pushvel(origin, pos, v)
+	local vec = vector.subtract(pos, origin)
+	local minr = 0
+	for i,v in pairs(vec) do
+		v = math.abs(v)
+		if v > minr then
+			minr = v
+		end
+	end
+
+	local r = vector.length(vec)
+	--local reicht = (r*1/(range+1) + minr*range/(range+1)) / 2
+	local reicht = (r + minr*range) / (2 * (range+1))
+	-- vsub = 1/range²
+	-- vfact = pushvel / (4 - vsub)
+	-- v(r) = vfact * (1/r² - vsub)
+
+	local vel = vfact * (1 / (reicht * reicht) - vsub)
+
+	v = vector.add(v, vector.multiply(vec, vel / r))
+	vel = vector.length(v)
+	if vel > 200 then
+		v = vector.multiply(v, 200 / vel)
+	end
+	return v
+end
+
+local function drop_item(pos, nodename, player, origin)
 	local drop_items = tnt_drop_items or (player and true)
 	local inv
 	if not drop_items then
@@ -26,33 +58,18 @@ local function drop_item(pos, nodename, player)
 		and inv:room_for_item("main", item) then
 			inv:add_item("main", item)
 		else
-			if type(item) == "string" then
-				local obj = minetest.add_item(pos, item)
-				if not obj then
-					minetest.log("error", "[tnt] item (string) could not be spawned, aborting..")
-					return
-				end
-				obj:get_luaentity().collect = true
-				obj:setacceleration({x=0, y=-10, z=0})
-				obj:setvelocity({x=pr:next(0,6)-3, y=10, z=pr:next(0,6)-3})
-			else
-				-- This is the wrong way, isn't it?
-				for i=1,item:get_count() do
-					local obj = minetest.add_item(pos, item:get_name())
-					if not obj then
-						minetest.log("error", "[tnt] item (single) could not be spawned, aborting..")
-						return
-					end
-					obj:get_luaentity().collect = true
-					obj:setacceleration({x=0, y=-10, z=0})
-					obj:setvelocity({x=pr:next(0,6)-3, y=10, z=pr:next(0,6)-3})
-				end
+			local obj = minetest.add_item(pos, item)
+			if not obj then
+				minetest.log("error", "[tnt] item could not be spawned, aborting..")
+				return
 			end
+			--obj:get_luaentity().collect = true -- @PilzAdam, what is this supposed to do?
+			obj:setvelocity(get_pushvel(origin, pos, vector.zero))
 		end
 	end
 end
 
-local function destroy(pos, player, area, nodes)
+local function destroy(pos, player, area, nodes, origin)
 	local p_pos = area:indexp(pos)
 	if nodes[p_pos] == tnt_c_air then
 		return
@@ -69,10 +86,10 @@ local function destroy(pos, player, area, nodes)
 	end
 	nodes[p_pos] = tnt_c_air
 	if pr:next(1,3) == 3
-	or not tnt_preserve_items then
+	or not preserve_items then
 		return
 	end
-	drop_item(pos, nodename, player)
+	drop_item(pos, nodename, player, origin)
 end
 
 local particledef = {
@@ -114,7 +131,7 @@ local function visualized_chunkupdate(p, pos)
 
 	update_single_chunk(p)
 
-	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=tnt_range*64})
+	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=range*64})
 
 	particledef_hot.pos = pos
 	minetest.add_particle(particledef_hot)
@@ -191,7 +208,7 @@ local function bare_boom(pos, player)
 	pr = get_tnt_random(pos)
 
 	local manip = minetest.get_voxel_manip()
-	local width = tnt_range
+	local width = range
 	local emin, emax = manip:read_from_map(vector.subtract(pos, width), vector.add(pos, width))
 	local area = VoxelArea:new{MinEdge=emin, MaxEdge=emax}
 	local nodes = manip:get_data()
@@ -204,20 +221,23 @@ local function bare_boom(pos, player)
 		if obj:is_player()
 		or (obj:get_luaentity() and obj:get_luaentity().name ~= "__builtin:item") then
 			local obj_p = obj:getpos()
-			local vec = {x=obj_p.x-pos.x, y=obj_p.y-pos.y, z=obj_p.z-pos.z}
-			local dist = (vec.x^2+vec.y^2+vec.z^2)^0.5
-			local damage = (80*0.5^dist)*2
-			obj:punch(obj, 1.0, {
-				full_punch_interval=1.0,
-				damage_groups={fleshy=damage},
-			}, vec)
+			obj:setvelocity(get_pushvel(pos, obj_p, obj:getvelocity() or obj:get_player_velocity() or vector.zero))
+			if damage_objects then
+				local vec = vector.subtract(obj_p, pos)
+				local dist = vector.length(vec)
+				local damage = (80*0.5^dist)*2
+				obj:punch(obj, 1.0, {
+					full_punch_interval=1.0,
+					damage_groups={fleshy=damage},
+				}, vec)
+			end
 		end
 	end
 
 	local near_tnts,nn = {},1
-	for dx=-tnt_range,tnt_range do
-		for dz=-tnt_range,tnt_range do
-			for dy=tnt_range,-tnt_range,-1 do
+	for dx=-range,range do
+		for dz=-range,range do
+			for dy=range,-range,-1 do
 				local p = {x=pos.x+dx, y=pos.y+dy, z=pos.z+dz}
 
 				local p_node = area:index(p.x, p.y, p.z)
@@ -232,12 +252,12 @@ local function bare_boom(pos, player)
 				elseif not ( d_p_node == tnt_c_fire
 				or string.find(nodename, "default:water_")
 				or string.find(nodename, "default:lava_")) then
-					if math.abs(dx)<tnt_range and math.abs(dy)<tnt_range and math.abs(dz)<tnt_range then
-						destroy(p, player, area, nodes)
-					else
-						if pr:next(1,5) <= 4 then
-							destroy(p, player, area, nodes)
-						end
+					if (
+						math.abs(dx) < range
+						and math.abs(dy) < range
+						and math.abs(dz) < range
+					) or pr:next(1,5) <= 4 then
+						destroy(p, player, area, nodes, pos)
 					end
 				end
 

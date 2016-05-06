@@ -1,3 +1,4 @@
 default
 fire
 function_delayer
+vector_extras
