@@ -4,6 +4,9 @@ local preserve_items = false
 local tnt_drop_items = false
 local damage_objects = true
 local tnt_seed = 15
+local laser_delay = 1.9
+local ignite_delay = 3.7
+local mesecons_delay = 0
 
 -- todo: use on_blasts of nodes, maybe dont delay map update because of those memory access crashes
 
@@ -12,7 +15,8 @@ local tnt_side = "default_tnt_side.png^tnt_shadows.png"
 local function get_tnt_random(pos)
 	return PseudoRandom(math.abs(pos.x+pos.y*3+pos.z*5)+tnt_seed)
 end
-local pr
+local pr, lighter_c
+local delay_c = ignite_delay
 
 local vsub = 1 / (range * range)
 local vfact = pushvel / (4 - vsub)
@@ -245,8 +249,9 @@ local function bare_boom(pos, player)
 				local nodename =  minetest.get_name_from_content_id(d_p_node)
 				if d_p_node == tnt_c_tnt
 				or d_p_node == tnt_c_tnt_burning then
-					nodes[p_node] = tnt_c_tnt_burning
-					--boom({x=p.x, y=p.y, z=p.z}, 0, player)
+					if d_p_node ~= tnt_c_tnt_burning then
+						nodes[p_node] = tnt_c_tnt_burning
+					end
 					near_tnts[nn] = p
 					nn = nn+1
 				elseif not ( d_p_node == tnt_c_fire
@@ -278,10 +283,18 @@ local function bare_boom(pos, player)
 	extend_chunkqueue(emin, emax, pos)
 end
 
-function boom(pos, time, player)
-	minetest.after(time, function(pos, player)
-		minetest.delay_function(10000, bare_boom, pos, player)
-	end, pos, player or {})
+local function ignite_tnt(pos, delay, player)
+	lighter_c = player
+	delay_c = delay
+	minetest.set_node(pos, {name="tnt:tnt_burning"})
+end
+
+local function delay_single_boom(pos, player)
+	minetest.delay_function(10000, bare_boom, pos, player or {})
+end
+
+local function timer_expired(pos)
+	delay_single_boom(pos, minetest.get_player_by_name(minetest.get_meta(pos):get_string("lighter")))
 end
 
 minetest.register_node(":tnt:tnt", {
@@ -290,27 +303,22 @@ minetest.register_node(":tnt:tnt", {
 	groups = {dig_immediate=2, mesecon=2},
 	sounds = default.node_sound_wood_defaults(),
 
-	on_punch = function(pos, node, puncher)
-		if puncher:get_wielded_item():get_name() == "default:torch" then
-			minetest.sound_play("tnt_ignite", {pos=pos})
-			minetest.set_node(pos, {name="tnt:tnt_burning"})
-			boom(pos, 4, puncher)
+	on_punch = function(pos, node, player)
+		if player:get_wielded_item():get_name() == "default:torch" then
+			ignite_tnt(pos, ignite_delay, player)
 		end
 	end,
 
 	mesecons = {
 		effector = {
 			action_on = function(pos, node)
-				minetest.set_node(pos, {name="tnt:tnt_burning"})
-				boom(pos, 0)
+				ignite_tnt(pos, mesecons_delay)
 			end
 		},
 	},
 	laser = {
 		enable = function(pos)
-			minetest.sound_play("tnt_ignite", {pos=pos})
-			minetest.set_node(pos, {name="tnt:tnt_burning"})
-			boom(pos, 2)
+			ignite_tnt(pos, laser_delay)
 		end
 	}
 })
@@ -335,6 +343,29 @@ minetest.register_node(":tnt:tnt_burning", {
 	light_source = 5,
 	drop = "",
 	sounds = default.node_sound_wood_defaults(),
+	on_timer = timer_expired,
+	-- unaffected by explosions
+	on_blast = function() end,
+	on_construct = function(pos)
+		if delay_c == 0 then
+			delay_single_boom(pos, lighter_c)
+			return
+		end
+		if lighter_c then
+			minetest.get_meta(pos):set_string("lighter", lighter_c:get_player_name())
+		end
+		minetest.sound_play("tnt_ignite", {pos = pos})
+		minetest.get_node_timer(pos):start(delay_c)
+		nodeupdate(pos)
+	end,
+})
+
+-- burning tnt should explode if it gets loaded when chunkloading
+minetest.register_lbm({
+	name = "tnt:explode_on_chunkload",
+	nodenames = {"tnt:tnt_burning"},
+	run_at_every_load = true,
+	action = timer_expired,
 })
 
 --minetest.register_node("tnt:boom", {drop="", groups={dig_immediate=3}})
@@ -342,9 +373,7 @@ minetest.register_node(":tnt:tnt_burning", {
 function burn(pos, player)
 	local nodename = minetest.get_node(pos).name
 	if nodename == "tnt:tnt" then
-		minetest.sound_play("tnt_ignite", {pos=pos})
-		minetest.set_node(pos, {name="tnt:tnt_burning"})
-		boom(pos, 1, player)
+		ignite_tnt(pos, 1, player)
 		return
 	end
 	if nodename ~= "tnt:gunpowder" then
@@ -358,28 +387,32 @@ function burn(pos, player)
 			return
 		end
 		minetest.after(0.5, function(pos)
-			minetest.remove_node(pos)
-		end, {x=pos.x, y=pos.y, z=pos.z})
+			if minetest.get_node(pos).name == "tnt:gunpowder_burning" then
+				minetest.remove_node(pos)
+			end
+		end, vector.new(pos))
 		for dx=-1,1 do
 			for dz=-1,1 do
 				for dy=-1,1 do
-					pos.x = pos.x+dx
-					pos.y = pos.y+dy
-					pos.z = pos.z+dz
+					if dx == 0
+					or dz == 0 then
+						pos.x = pos.x+dx
+						pos.y = pos.y+dy
+						pos.z = pos.z+dz
 
-					if not (math.abs(dx) == 1 and math.abs(dz) == 1) then
 						if dy == 0 then
-							burn({x=pos.x, y=pos.y, z=pos.z}, player)
+							burn(vector.new(pos), player)
 						else
-							if math.abs(dx) == 1 or math.abs(dz) == 1 then
-								burn({x=pos.x, y=pos.y, z=pos.z}, player)
+							if dx ~= 0
+							or dz ~= 0 then
+								burn(vector.new(pos), player)
 							end
 						end
-					end
 
-					pos.x = pos.x-dx
-					pos.y = pos.y-dy
-					pos.z = pos.z-dz
+						pos.x = pos.x-dx
+						pos.y = pos.y-dy
+						pos.z = pos.z-dz
+					end
 				end
 			end
 		end
@@ -402,8 +435,8 @@ minetest.register_node(":tnt:gunpowder", {
 	groups = {dig_immediate=2,attached_node=1},
 	sounds = default.node_sound_leaves_defaults(),
 
-	on_punch = function(pos, _, puncher)
-		if puncher:get_wielded_item():get_name() == "default:torch" then
+	on_punch = function(pos, _, player)
+		if player:get_wielded_item():get_name() == "default:torch" then
 			burn(pos, puncher)
 		end
 	end,
@@ -439,8 +472,7 @@ minetest.register_abm({
 	catch_up = false,
 	action = function(pos, node)
 		if node.name == "tnt:tnt" then
-			minetest.set_node(pos, {name="tnt:tnt_burning"})
-			boom({x=pos.x, y=pos.y, z=pos.z}, 0)
+			ignite_tnt(pos, 0)
 		else
 			burn(pos)
 		end
