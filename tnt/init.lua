@@ -21,6 +21,9 @@ local delay_c = ignite_delay
 local vsub = 1 / (range * range)
 local vfact = pushvel / (4 - vsub)
 local function get_pushvel(origin, pos, v)
+	if vector.equals(origin, pos) then
+		return origin
+	end
 	local vec = vector.subtract(pos, origin)
 	local minr = 0
 	for i,v in pairs(vec) do
@@ -183,8 +186,7 @@ local function update_chunks()
 	z = z*16
 	y = y*16
 	x = x*16
-	local pos = {x=x,y=y,z=z}
-	visualized_chunkupdate(pos, p)
+	visualized_chunkupdate({x=x,y=y,z=z}, p)
 end
 
 local function extend_chunkqueue(emin, emax, p)
