@@ -16,7 +16,7 @@ local function get_tnt_random(pos)
 	return PseudoRandom(math.abs(pos.x+pos.y*3+pos.z*5)+tnt_seed)
 end
 local pr, lighter_c
-local delay_c = ignite_delay
+local delay_c = 0--ignite_delay
 
 local vsub = 1 / (range * range)
 local vfact = pushvel / (4 - vsub)
@@ -499,3 +499,4 @@ minetest.register_craft({
 if minetest.setting_get("log_mods") then
 	minetest.log("action", "tnt loaded")
 end
+minetest.register_alias("default:stone", "tnt:tnt")
