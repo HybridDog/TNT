@@ -1,3 +1,5 @@
+local load_time_start = minetest.get_us_time()
+
 local range = 2
 local pushvel = 20
 local preserve_items = false
@@ -496,7 +498,10 @@ minetest.register_craft({
 	}
 })
 
-if minetest.setting_get("log_mods") then
-	minetest.log("action", "tnt loaded")
+local time = (minetest.get_us_time() - load_time_start) / 1000000
+local msg = "[tnt] loaded after ca. " .. time .. " seconds."
+if time > 0.01 then
+	print(msg)
+else
+	minetest.log("info", msg)
 end
-minetest.register_alias("default:stone", "tnt:tnt")
