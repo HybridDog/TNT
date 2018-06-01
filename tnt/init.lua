@@ -28,7 +28,7 @@ local function get_pushvel(origin, pos, v)
 	end
 	local vec = vector.subtract(pos, origin)
 	local minr = 0
-	for i,v in pairs(vec) do
+	for _,v in pairs(vec) do
 		v = math.abs(v)
 		if v > minr then
 			minr = v
@@ -125,21 +125,13 @@ local particledef_hot = {
 	texture = "tnt_boom.png",
 }
 
--- vm updates a single mapchunk
-local function update_single_chunk(pos)
-	local manip = minetest.get_voxel_manip()
-	local emin,emax = manip:read_from_map(pos, pos)--vector.add(pos, 15))
-
-	manip:write_to_map()
-	manip:update_map()
-end
-
 -- updates mapchunk and then adds particles and plays sound
 local function visualized_chunkupdate(p, pos)
-	local t1 = minetest.get_us_time()
+	--~ local t1 = minetest.get_us_time()
 
-	update_single_chunk(p)
+	minetest.fix_light(p, vector.add(p, 15))
 
+	--~ print("play sound: " .. minetest.pos_to_string(pos))
 	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=range*64})
 
 	particledef_hot.pos = pos
@@ -157,45 +149,49 @@ local function get_chunk(pos)
 	return vector.apply(vector.divide(pos, 16), math.floor)
 end--]]
 
-local set = vector.set_data_to_pos
-local get = vector.get_data_from_pos
-local remove = vector.remove_data_from_pos
+local pos2hash = minetest.hash_node_position
+local hash2pos = minetest.get_position_from_hash
 
 local chunkqueue_working = false
 local chunkqueue_list
 local chunkqueue = {}
 local function update_chunks()
-	local n
 	if not chunkqueue_list
 	and next(chunkqueue) then
-		local _
-		chunkqueue_list,_,_,n = vector.get_data_pos_table(chunkqueue)
+		chunkqueue_list = {}
+		local n = 0
+		for vi,p in pairs(chunkqueue) do
+			n = n+1
+			chunkqueue_list[n] = {hash2pos(vi), p}
+		end
 	end
 	--[[if n then
 		print("[tnt] updating "..n.." chunks in time")
 	end--]]
-	n = next(chunkqueue_list)
-	if not n then
-		--print("stopping chunkupdate")
+	local n = #chunkqueue_list
+	if n == 0 then
+		--~ print("stopping chunkupdate")
 		chunkqueue_working = false
 		return
 	end
+	local t = chunkqueue_list[n]
+	local ch_pos, pos = t[1], t[2]
+	chunkqueue_list[n] = nil
+	chunkqueue[pos2hash(pos)] = nil
 	minetest.delay_function(16384, update_chunks)
 
-	local z,y,x, p = unpack(chunkqueue_list[n])
-	chunkqueue_list[n] = nil
-	remove(chunkqueue, z,y,x)
-	z = z*16
-	y = y*16
-	x = x*16
-	visualized_chunkupdate({x=x,y=y,z=z}, p)
+	--~ print("chunkupdate " .. minetest.pos_to_string(ch_pos) .. " " ..
+		--~ minetest.pos_to_string(pos))
+
+	visualized_chunkupdate(vector.multiply(ch_pos, 16), pos)
 end
 
 local function extend_chunkqueue(emin, emax, p)
 	for z = emin.z, emax.z, 16 do
 		for y = emin.y, emax.y, 16 do
 			for x = emin.x, emax.x, 16 do
-				set(chunkqueue, z/16,y/16,x/16, p)
+				local ch_pos = {x = x / 16, y = y / 16, z = z / 16}
+				chunkqueue[pos2hash(ch_pos)] = p
 			end
 		end
 	end
@@ -212,7 +208,7 @@ local function bare_boom(pos, player)
 		return
 	end
 
-	local t1 = minetest.get_us_time()
+	--~ local t1 = minetest.get_us_time()
 	pr = get_tnt_random(pos)
 
 	local manip = minetest.get_voxel_manip()
@@ -275,7 +271,7 @@ local function bare_boom(pos, player)
 	end
 
 	manip:set_data(nodes)
-	manip:write_to_map()
+	manip:write_to_map(false)
 	--print("[tnt] exploded after ca. ".. (minetest.get_us_time() - t1) / 1000000 .." s")
 
 	minetest.delay_function(10000, function(near_tnts, player)
@@ -307,7 +303,7 @@ minetest.register_node(":tnt:tnt", {
 	groups = {dig_immediate=2, mesecon=2},
 	sounds = default.node_sound_wood_defaults(),
 
-	on_punch = function(pos, node, player)
+	on_punch = function(pos, _, player)
 		if player:get_wielded_item():get_name() == "default:torch" then
 			ignite_tnt(pos, ignite_delay, player)
 		end
@@ -315,7 +311,7 @@ minetest.register_node(":tnt:tnt", {
 
 	mesecons = {
 		effector = {
-			action_on = function(pos, node)
+			action_on = function(pos)
 				ignite_tnt(pos, mesecons_delay)
 			end
 		},
@@ -360,7 +356,6 @@ minetest.register_node(":tnt:tnt_burning", {
 		end
 		minetest.sound_play("tnt_ignite", {pos = pos})
 		minetest.get_node_timer(pos):start(delay_c)
-		nodeupdate(pos)
 	end,
 })
 
