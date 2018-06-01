@@ -125,84 +125,6 @@ local particledef_hot = {
 	texture = "tnt_boom.png",
 }
 
--- updates mapchunk and then adds particles and plays sound
-local function visualized_chunkupdate(p, pos)
-	--~ local t1 = minetest.get_us_time()
-
-	minetest.fix_light(p, vector.add(p, 15))
-
-	--~ print("play sound: " .. minetest.pos_to_string(pos))
-	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5, max_hear_distance=range*64})
-
-	particledef_hot.pos = pos
-	minetest.add_particle(particledef_hot)
-
-	particledef.minpos = vector.subtract(pos, 3)
-	particledef.maxpos = vector.add(pos, 3)
-	minetest.add_particlespawner(particledef)
-
-	--print("[tnt] map updated at "..vector.pos_to_string(pos) .." after ca. ".. (minetest.get_us_time() - t1) / 1000000 .." s")
-end
-
---[[
-local function get_chunk(pos)
-	return vector.apply(vector.divide(pos, 16), math.floor)
-end--]]
-
-local pos2hash = minetest.hash_node_position
-local hash2pos = minetest.get_position_from_hash
-
-local chunkqueue_working = false
-local chunkqueue_list
-local chunkqueue = {}
-local function update_chunks()
-	if not chunkqueue_list
-	and next(chunkqueue) then
-		chunkqueue_list = {}
-		local n = 0
-		for vi,p in pairs(chunkqueue) do
-			n = n+1
-			chunkqueue_list[n] = {hash2pos(vi), p}
-		end
-	end
-	--[[if n then
-		print("[tnt] updating "..n.." chunks in time")
-	end--]]
-	local n = #chunkqueue_list
-	if n == 0 then
-		--~ print("stopping chunkupdate")
-		chunkqueue_working = false
-		return
-	end
-	local t = chunkqueue_list[n]
-	local ch_pos, pos = t[1], t[2]
-	chunkqueue_list[n] = nil
-	chunkqueue[pos2hash(pos)] = nil
-	minetest.delay_function(16384, update_chunks)
-
-	--~ print("chunkupdate " .. minetest.pos_to_string(ch_pos) .. " " ..
-		--~ minetest.pos_to_string(pos))
-
-	visualized_chunkupdate(vector.multiply(ch_pos, 16), pos)
-end
-
-local function extend_chunkqueue(emin, emax, p)
-	for z = emin.z, emax.z, 16 do
-		for y = emin.y, emax.y, 16 do
-			for x = emin.x, emax.x, 16 do
-				local ch_pos = {x = x / 16, y = y / 16, z = z / 16}
-				chunkqueue[pos2hash(ch_pos)] = p
-			end
-		end
-	end
-	chunkqueue_list = nil
-	if not chunkqueue_working then
-		chunkqueue_working = true
-		--print("start chunkupdate")
-		minetest.delay_function(16384, update_chunks)
-	end
-end
-
 local function bare_boom(pos, player)
 	if minetest.get_node(pos).name ~= "tnt:tnt_burning" then
 		return
@@ -271,16 +193,30 @@ local function bare_boom(pos, player)
 	end
 
 	manip:set_data(nodes)
-	manip:write_to_map(false)
-	--print("[tnt] exploded after ca. ".. (minetest.get_us_time() - t1) / 1000000 .." s")
 
+	manip:write_to_map()
+	minetest.sound_play("tnt_explode", {pos=pos, gain=1.5,
+		max_hear_distance=range*64})
+
+	particledef_hot.pos = pos
+	minetest.add_particle(particledef_hot)
+
+	particledef.minpos = vector.subtract(pos, 3)
+	particledef.maxpos = vector.add(pos, 3)
+	minetest.add_particlespawner(particledef)
+
+	--~ print(("[tnt] exploded after ca. %.4g s"):format(
+		--~ (minetest.get_us_time() - t1) / 1000000))
+
+	-- explode near_tnts all at once to reduce the overall delay,
 	minetest.delay_function(10000, function(near_tnts, player)
 		for _,p in pairs(near_tnts) do
 			bare_boom(p, player)
 		end
 	end, near_tnts, player)
-
-	extend_chunkqueue(emin, emax, pos)
+	--~ for _,p in pairs(near_tnts) do
+		--~ minetest.delay_function(10000, bare_boom, p, player)
+	--~ end
 end
 
 local function ignite_tnt(pos, delay, player)
@@ -294,7 +230,8 @@ local function delay_single_boom(pos, player)
 end
 
 local function timer_expired(pos)
-	delay_single_boom(pos, minetest.get_player_by_name(minetest.get_meta(pos):get_string("lighter")))
+	delay_single_boom(pos, minetest.get_player_by_name(
+		minetest.get_meta(pos):get_string"lighter"))
 end
 
 minetest.register_node(":tnt:tnt", {
